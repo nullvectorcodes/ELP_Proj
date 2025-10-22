@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>LifeTrack Dashboard | Glass Edition</title>
+    <!-- Load Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Use Inter font family -->
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
+        body { font-family: 'Inter', sans-serif; }
+
+        /* Custom styles for Glassmorphism and Sidebar Transition */
+        .glass-sidebar {
+            /* Basic transparency for dark base */
+            background-color: rgba(255, 255, 255, 0.05); 
+            /* Glass effect */
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-right: 1px solid rgba(255, 255, 255, 0.1);
+            transition: width 0.3s ease-in-out;
+            min-height: 100vh;
+        }
+
+        .glass-card {
+            background-color: rgba(255, 255, 255, 0.05);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+            border: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        /* Enforce deep black background */
+        .bg-dark-bg {
+            background-color: #0A0A0A;
+        }
+    </style>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        // High-contrast, neon colors for a super aesthetic black theme
+                        'primary': '#00BFFF', // Bright Cyan/Blue for titles/focus
+                        'secondary': '#FF69B4', // Hot Pink for secondary emphasis
+                        'accent': '#32CD32', // Lime Green for points/success
+                        'dark-bg': '#0A0A0A', // Deep Black
+                        'card-bg': 'rgba(255, 255, 255, 0.05)', // Transparent white for glass base
+                    }
+                }
+            }
+        }
+    </script>
+</head>
+<body class="bg-dark-bg min-h-screen text-gray-100 flex">
+
+    <!-- Firebase Imports and Setup -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, onSnapshot, collection, query, limit, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // --- GLOBAL VARIABLES (Provided by Canvas Environment) ---
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
+        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
+
+        let app, db, auth;
+        let userId = null;
+        let isAuthReady = false;
+
+        // Simple State Object
+        const state = {
+            view: 'profile', // profile | leaderboard | progress | log_action
+            totalPoints: 0,
+            activities: [],
+            leaderboardData: [],
+            username: 'User_' + Math.floor(Math.random() * 1000), // Default username
+        };
+
+        // UI Element References
+        const contentArea = document.getElementById('content-area');
+        const modal = document.getElementById('action-modal');
+        const totalPointsDisplay = document.getElementById('total-points-display');
+        const notificationBox = document.getElementById('notification-box');
+
+        // --- FIREBASE INITIALIZATION & AUTHENTICATION ---
+
+        async function initFirebase() {
+            if (!firebaseConfig) {
+                console.error("Firebase config is missing.");
+                return;
+            }
+
+            try {
+                app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                // 1. Sign in
+                if (initialAuthToken) {
+                    await signInWithCustomToken(auth, initialAuthToken);
+                } else {
+                    await signInAnonymously(auth);
+                }
+
+                // 2. Set up Auth Listener
+                onAuthStateChanged(auth, (user) => {
+                    if (user) {
+                        userId = user.uid;
+                        isAuthReady = true;
+                        console.log("Firebase initialized. User ID:", userId);
+                        // Fetch initial data and start listeners
+                        setupDataListeners();
+                        updateView(state.view); // Render the initial view
+                    } else {
+                        console.error("Auth failed.");
+                    }
+                });
+
+            } catch (e) {
+                console.error("Error initializing Firebase:", e);
+            }
+        }
+
+        // --- FIREBASE PATH HELPERS ---
+
+        const getPrivateActivitiesCollectionRef = () => {
+            return collection(db, `artifacts/${appId}/users/${userId}/activities`);
+        };
+
+        const getPublicScoreDocRef = (uid = userId) => {
+            // Uses uid as the document ID for the public leaderboard score
+            return doc(db, `artifacts/${appId}/public/data/leaderboard_scores`, uid);
+        };
+
+        // --- DATA LISTENERS ---
+
+        function setupDataListeners() {
+            if (!db || !userId) return;
+
+            // 1. Listener for User Activities (Private Progress)
+            const activitiesQuery = query(getPrivateActivitiesCollectionRef(), orderBy("timestamp", "desc"));
+
+            onSnapshot(activitiesQuery, (snapshot) => {
+                const activities = [];
+                let newTotalPoints = 0;
+                snapshot.forEach((doc) => {
+                    const activity = doc.data();
+                    activities.push({...activity, id: doc.id});
+                    newTotalPoints += activity.points;
+                });
+                state.activities = activities;
+                state.totalPoints = newTotalPoints;
+                totalPointsDisplay.textContent = newTotalPoints.toLocaleString();
+                console.log("Activities updated. Total Points:", newTotalPoints);
+                if (state.view === 'progress') renderProgressView();
+                
+                // After fetching points, ensure the public score is updated
+                updatePublicScore(newTotalPoints);
+            });
+
+            // 2. Listener for Public Leaderboard
+            const leaderboardQuery = query(collection(db, `artifacts/${appId}/public/data/leaderboard_scores`), limit(10));
+            
+            onSnapshot(leaderboardQuery, (snapshot) => {
+                const boardData = [];
+                snapshot.forEach((doc) => {
+                    boardData.push(doc.data());
+                });
+                
+                // Sort client-side (as per guidelines, avoid orderBy in queries)
+                boardData.sort((a, b) => b.totalPoints - a.totalPoints);
+
+                state.leaderboardData = boardData.map((item, index) => ({
+                    ...item,
+                    rank: index + 1
+                }));
+                console.log("Leaderboard updated.");
+                if (state.view === 'leaderboard') renderLeaderboardView();
+            });
+        }
+        
+        // --- DATA MUTATION ---
+        
+        async function updatePublicScore(newTotalPoints) {
+            if (!userId) return;
+            const scoreRef = getPublicScoreDocRef();
+            
+            // Check if user already exists in the leaderboard
+            const docSnap = await getDoc(scoreRef);
+            
+            if (docSnap.exists()) {
+                // Update existing score
+                await updateDoc(scoreRef, {
+                    totalPoints: newTotalPoints,
+                    lastUpdated: new Date()
+                }).catch(e => console.error("Error updating public score:", e));
+            } else {
+                // Create new score entry
+                await setDoc(scoreRef, {
+                    userId: userId,
+                    username: state.username,
+                    totalPoints: newTotalPoints,
+                    lastUpdated: new Date()
+                }).catch(e => console.error("Error setting initial public score:", e));
+            }
+        }
+
+
+        // --- POINT LOGIC & UI FUNCTIONS ---
+
+        function calculatePoints(text) {
+            text = text.toLowerCase();
+            let points = 0;
+            let multipliers = [];
+
+            // Simple point system based on keywords
+            if (text.includes('workout') || text.includes('exercise') || text.includes('ran') || text.includes('gym')) {
+                points += 20;
+                multipliers.push('Fitness');
+            }
+            if (text.includes('ate vegetable') || text.includes('salad') || text.includes('drank water') || text.includes('meal prep')) {
+                points += 10;
+                multipliers.push('Nutrition');
+            }
+            if (text.includes('read') || text.includes('studied') || text.includes('learned') || text.includes('coded')) {
+                points += 15;
+                multipliers.push('Learning');
+            }
+            if (text.includes('meditated') || text.includes('slept 8') || text.includes('journaled')) {
+                points += 5;
+                multipliers.push('Wellbeing');
+            }
+
+            // Fallback for any logged activity
+            if (points === 0 && text.length > 5) {
+                points = 1;
+                multipliers.push('Misc');
+            }
+            
+            return { points: points, categories: multipliers };
+        }
+        
+        async function logActivity(text) {
+            if (!db || !userId) {
+                showNotification("Error: Not connected to the database.", 0);
+                return;
+            }
+            if (text.trim() === '') return;
+
+            const { points, categories } = calculatePoints(text);
+            const activityRef = getPrivateActivitiesCollectionRef();
+
+            try {
+                await addDoc(activityRef, {
+                    description: text,
+                    points: points,
+                    categories: categories,
+                    timestamp: new Date()
+                });
+                
+                showNotification(`Logged action! You earned ${points} points for ${categories.join(', ') || 'an unknown action'}.`, points);
+                
+                // Close modal and clear input
+                modal.classList.add('hidden');
+                document.getElementById('action-input').value = '';
+                
+            } catch (e) {
+                console.error("Error logging activity: ", e);
+                showNotification("An error occurred while saving your activity.", 0);
+            }
+        }
+        
+        function showNotification(message, points) {
+            const pointText = points > 0 ? `<span class="font-bold text-lg">${points} Pts!</span>` : '';
+            notificationBox.innerHTML = `
+                <div class="flex items-center space-x-2">
+                    <svg class="w-6 h-6 ${points > 0 ? 'text-accent' : 'text-red-400'}" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                    <div>
+                        <p class="font-medium">${message}</p>
+                    </div>
+                </div>
+            `;
+            notificationBox.classList.remove('opacity-0', 'pointer-events-none', 'translate-x-full');
+            notificationBox.classList.add('opacity-100', 'translate-x-0');
+
+            setTimeout(() => {
+                notificationBox.classList.remove('opacity-100', 'translate-x-0');
+                notificationBox.classList.add('opacity-0', 'pointer-events-none', 'translate-x-full');
+            }, 3000);
+        }
+
+        // --- RENDER FUNCTIONS ---
+        
+        function updateView(newView) {
+            state.view = newView;
+            document.querySelectorAll('.nav-button').forEach(btn => {
+                btn.classList.remove('bg-primary/20', 'text-white');
+                btn.classList.add('hover:bg-primary/10');
+            });
+            document.getElementById(`nav-${newView}`).classList.remove('hover:bg-primary/10');
+            document.getElementById(`nav-${newView}`).classList.add('bg-primary/20', 'text-white');
+
+            switch (newView) {
+                case 'profile':
+                    renderProfileView();
+                    break;
+                case 'leaderboard':
+                    renderLeaderboardView();
+                    break;
+                case 'progress':
+                    renderProgressView();
+                    break;
+            }
+        }
+        
+        function renderProfileView() {
+            contentArea.innerHTML = `
+                <div class="p-8">
+                    <h1 class="text-3xl font-extrabold text-primary mb-6">User Profile</h1>
+                    <div class="glass-card p-6 rounded-xl shadow-lg">
+                        <p class="text-gray-400 mb-4">Your personalized gamified tracking dashboard.</p>
+                        <p class="text-lg font-semibold mb-2">Username: <span class="text-accent">${state.username}</span></p>
+                        <p class="text-lg font-semibold mb-2">User ID (for team play):</p>
+                        <div class="bg-gray-700 p-3 rounded-md break-all text-sm text-gray-300">${userId || 'Loading...'}</div>
+                        <p class="text-2xl font-bold mt-6">Total Lifetime Points: <span class="text-primary">${state.totalPoints.toLocaleString()}</span></p>
+                    </div>
+                    
+                    <h2 class="text-xl font-bold mt-8 mb-4 text-primary">How it Works</h2>
+                    <div class="glass-card p-6 rounded-xl">
+                        <ul class="list-disc pl-5 text-gray-300 space-y-2">
+                            <li>Click **"Log Action"** to input your daily achievements (e.g., "I ran 3 miles", "I read a chapter").</li>
+                            <li>Points are calculated based on keywords (e.g., 'ran' gives 20 pts, 'read' gives 15 pts).</li>
+                            <li>Your **Progress** view tracks your historical activities.</li>
+                            <li>The **Leaderboard** tracks your score against others using this app!</li>
+                        </ul>
+                    </div>
+                </div>
+            `;
+        }
+
+        function renderLeaderboardView() {
+            let listItems = state.leaderboardData.map(item => `
+                <li class="flex items-center justify-between p-4 rounded-xl ${item.userId === userId ? 'bg-primary/30 border-2 border-primary' : 'glass-card hover:bg-white/10'} transition duration-150">
+                    <div class="flex items-center space-x-4">
+                        <span class="text-2xl font-extrabold ${item.rank === 1 ? 'text-yellow-400' : item.rank === 2 ? 'text-gray-300' : item.rank === 3 ? 'text-yellow-600' : 'text-gray-400'} w-8 text-center">${item.rank}.</span>
+                        <div>
+                            <p class="text-lg font-semibold">${item.username}</p>
+                            <p class="text-xs text-gray-400 break-all">${item.userId}</p>
+                        </div>
+                    </div>
+                    <span class="text-2xl font-bold text-accent">${item.totalPoints.toLocaleString()}</span>
+                </li>
+            `).join('');
+
+            if (state.leaderboardData.length === 0) {
+                listItems = '<p class="text-center text-gray-400 py-8 glass-card rounded-xl">No scores logged yet. Be the first to earn points!</p>';
+            }
+
+            contentArea.innerHTML = `
+                <div class="p-8">
+                    <h1 class="text-3xl font-extrabold text-primary mb-6">Global Leaderboard</h1>
+                    <ul class="space-y-3">
+                        ${listItems}
+                    </ul>
+                </div>
+            `;
+        }
+        
+        function renderProgressView() {
+            let activitiesList = state.activities.map(activity => {
+                const date = new Date(activity.timestamp.seconds * 1000).toLocaleString();
+                const categoryTags = activity.categories.map(cat => `<span class="text-xs font-medium bg-secondary/30 text-secondary px-2 py-0.5 rounded-full">${cat}</span>`).join(' ');
+                
+                return `
+                    <li class="glass-card p-4 rounded-xl shadow-md flex justify-between items-start">
+                        <div class="flex-1 min-w-0">
+                            <p class="text-lg font-medium text-white break-words">${activity.description}</p>
+                            <p class="text-sm text-gray-400 mt-1">${date}</p>
+                            <div class="flex space-x-2 mt-2">
+                                ${categoryTags}
+                            </div>
+                        </div>
+                        <span class="text-2xl font-extrabold text-accent ml-4">${activity.points} Pts</span>
+                    </li>
+                `;
+            }).join('');
+            
+            if (state.activities.length === 0) {
+                activitiesList = '<p class="text-center text-gray-400 py-8 glass-card rounded-xl">You haven\'t logged any activities yet. Log one now to start!</p>';
+            }
+
+            contentArea.innerHTML = `
+                <div class="p-8">
+                    <h1 class="text-3xl font-extrabold text-primary mb-6">Your Progress History</h1>
+                    <div class="glass-card p-4 rounded-xl mb-6">
+                        <p class="text-xl font-bold">Current Total Points: <span class="text-accent">${state.totalPoints.toLocaleString()}</span></p>
+                    </div>
+                    <ul class="space-y-4">
+                        ${activitiesList}
+                    </ul>
+                </div>
+            `;
+            
+        }
+
+        // --- ATTACH EVENT LISTENERS & START APP ---
+
+        window.onload = () => {
+            document.getElementById('log-action-btn').addEventListener('click', () => {
+                modal.classList.remove('hidden');
+            });
+
+            document.getElementById('close-modal-btn').addEventListener('click', () => {
+                modal.classList.add('hidden');
+            });
+            
+            document.getElementById('action-form').addEventListener('submit', (e) => {
+                e.preventDefault();
+                const input = document.getElementById('action-input').value;
+                logActivity(input);
+            });
+            
+            document.getElementById('nav-profile').addEventListener('click', () => updateView('profile'));
+            document.getElementById('nav-leaderboard').addEventListener('click', () => updateView('leaderboard'));
+            document.getElementById('nav-progress').addEventListener('click', () => updateView('progress'));
+
+            // Start the application
+            initFirebase();
+        };
+
+        // Expose updateView globally for initial setup if needed, though window.onload handles it
+        window.updateView = updateView;
+        
+    </script>
+    
+    <!-- MAIN APPLICATION UI -->
+
+    <!-- Sidebar: w-20 (collapsed) hover:w-64 (expanded) -->
+    <div class="w-20 hover:w-64 glass-sidebar flex-shrink-0 p-4 shadow-2xl z-20 group flex flex-col justify-between overflow-hidden">
+        
+        <!-- Header (Logo/Title) -->
+        <div class="mb-8 pt-2 h-10 flex justify-center group-hover:justify-start">
+            <span class="text-3xl font-bold text-primary tracking-wider whitespace-nowrap overflow-hidden opacity-0 group-hover:opacity-100 transition-opacity duration-300">LifeTrack</span>
+            <span class="text-3xl font-bold text-primary tracking-wider text-center group-hover:hidden">L</span>
+        </div>
+        
+        <!-- Navigation Buttons -->
+        <div class="space-y-4 flex-grow">
+            <!-- Profile -->
+            <button id="nav-profile" class="nav-button w-full flex items-center p-3 rounded-xl transition duration-150 justify-center group-hover:justify-start bg-primary/20 text-white">
+                <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <span class="whitespace-nowrap overflow-hidden text-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300 ml-3">Profile</span>
+            </button>
+            <!-- Leaderboard -->
+            <button id="nav-leaderboard" class="nav-button w-full flex items-center p-3 rounded-xl transition duration-150 hover:bg-primary/10 justify-center group-hover:justify-start">
+                <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.058L2.492 15.602a5.4 5.4 0 011.479-8.485l4.382-2.191c.214-.108.435-.157.655-.181L14 10z"></path></svg>
+                <span class="whitespace-nowrap overflow-hidden text-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300 ml-3">Leaderboard</span>
+            </button>
+            <!-- Progress -->
+            <button id="nav-progress" class="nav-button w-full flex items-center p-3 rounded-xl transition duration-150 hover:bg-primary/10 justify-center group-hover:justify-start">
+                <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-6v6m-4-2v4m12 1a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h12a2 2 0 012 2v10z"></path></svg>
+                <span class="whitespace-nowrap overflow-hidden text-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300 ml-3">Progress</span>
+            </button>
+        </div>
+
+        <!-- Score and Log Action (Bottom) -->
+        <div class="mt-auto pt-4 border-t border-gray-700">
+            <div class="group-hover:block hidden">
+                <h3 class="text-sm font-semibold text-gray-400 uppercase mb-2">My Score</h3>
+                <div class="flex items-center justify-between bg-black/30 p-3 rounded-lg shadow-inner">
+                    <span class="text-xl font-bold text-accent">Points:</span>
+                    <span id="total-points-display" class="text-2xl font-extrabold text-white">0</span>
+                </div>
+            </div>
+
+            <!-- Log Action Button (Text expanded, Icon collapsed) -->
+            <button id="log-action-btn" class="mt-6 w-full bg-accent hover:bg-accent/80 text-dark-bg font-bold py-3 px-4 rounded-xl shadow-lg transform transition duration-200 hover:scale-[1.02] flex justify-center items-center">
+                <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                <span class="whitespace-nowrap overflow-hidden opacity-0 group-hover:opacity-100 transition-opacity duration-300 ml-3">Log Action</span>
+            </button>
+        </div>
+    </div>
+
+    <!-- Main Content Area -->
+    <div id="content-area" class="flex-1 overflow-y-auto">
+        <!-- Content will be rendered here by JavaScript -->
+        <div class="p-8 text-center text-primary text-xl">Loading LifeTrack Dashboard...</div>
+    </div>
+    
+    <!-- Notification Box (Absolute Positioned, slides in from right) -->
+    <div id="notification-box" class="fixed top-5 right-5 z-50 p-4 rounded-xl shadow-2xl glass-card border-accent text-white transition-all duration-500 opacity-0 pointer-events-none translate-x-full">
+        <!-- Content inserted by showNotification function -->
+    </div>
+
+    <!-- Log Action Modal -->
+    <div id="action-modal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-40 hidden">
+        <div class="glass-card p-8 rounded-xl shadow-2xl w-full max-w-md transform scale-100 transition-transform duration-300">
+            <div class="flex justify-between items-center mb-6">
+                <h2 class="text-2xl font-bold text-primary">Log Your Achievement</h2>
+                <button id="close-modal-btn" class="text-gray-400 hover:text-white transition">
+                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
+                </button>
+            </div>
+            
+            <form id="action-form">
+                <label for="action-input" class="block text-sm font-medium text-gray-300 mb-2">What did you do?</label>
+                <textarea 
+                    id="action-input" 
+                    rows="4" 
+                    class="w-full p-3 bg-black/30 border border-primary/50 rounded-lg text-white focus:ring-primary focus:border-primary transition duration-150 resize-none" 
+                    placeholder="E.g., I ran 3 miles today after work and drank 8 glasses of water." 
+                    required></textarea>
+                
+                <p class="text-xs text-gray-400 mt-2">Keywords like 'ran', 'read', 'vegetable', or 'studied' will earn you points!</p>
+                
+                <button type="submit" class="mt-6 w-full bg-primary hover:bg-primary/80 text-dark-bg font-bold py-3 rounded-xl shadow-md transition duration-200">
+                    Send Action
+                </button>
+            </form>
+        </div>
+    </div>
+
+</body>
+</html>
