@@ -1,0 +1,19 @@
+Website
+|_ html
+    |_ Index.html
+    |_ Login.html
+    |_ Register.html
+    |_ Profile.html
+    |_ Leaderboard.html
+    |_ Settings.html
+    |_ Tracker.html
+|_ Css
+    |_ style.css
+|_ Js
+    |_ script.js
+|_ Images
+    |_ Images
+|_ Icons
+    |_ Icons
+|_ Fonts
+    |_ Fonts
