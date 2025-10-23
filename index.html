@@ -3,576 +3,240 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>LifeTrack Dashboard | Aesthetic Glass Edition</title>
-    <!-- Load Tailwind CSS -->
-    <script src="https://cdn.tailwindcss.com"></script>
-    <!-- Use Inter font family -->
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@100..900&display=swap');
-        body { font-family: 'Inter', sans-serif; }
-
-        /* Custom styles for Glassmorphism and Sidebar Transition */
-        .glass-sidebar {
-            /* Deeper transparency for glass base */
-            background-color: rgba(255, 255, 255, 0.03); 
-            /* Enhanced Glass effect with more blur */
-            backdrop-filter: blur(14px); 
-            -webkit-backdrop-filter: blur(14px);
-            /* Subtle neon border on the edge */
-            border-right: 1px solid rgba(0, 255, 255, 0.2); 
-            transition: width 0.4s cubic-bezier(0.25, 0.46, 0.45, 0.94); /* Smoother transition curve */
-            min-height: 100vh;
-            border-radius: 0 3rem 3rem 0; /* Rounded right edge of the sidebar */
-            box-shadow: 10px 0 30px rgba(0, 0, 0, 0.3); /* Subtle outer shadow */
-        }
-
-        .glass-card {
-            background-color: rgba(255, 255, 255, 0.05);
-            backdrop-filter: blur(8px); 
-            -webkit-backdrop-filter: blur(8px);
-            border: 1px solid rgba(255, 255, 255, 0.08);
-            border-radius: 1.5rem; /* Larger rounding for cards */
-            box-shadow: 0 4px 30px rgba(0, 0, 0, 0.2); 
-        }
-        
-        /* Enforce deep black background */
-        .bg-dark-bg {
-            background-color: #050505; /* Even deeper black for high contrast */
-        }
-        
-        /* Fix for scroll behavior on content area */
-        #content-area {
-            overflow-y: auto;
-            max-height: 100vh;
-        }
-    </style>
-    <script>
-        tailwind.config = {
-            theme: {
-                extend: {
-                    colors: {
-                        // High-tech, neon palette
-                        'primary': '#00FFFF', // Electric Cyan for focus
-                        'secondary': '#FF00FF', // Vivid Magenta for secondary emphasis
-                        'accent': '#00FF7F', // Spring Green for points/success
-                        'dark-bg': '#050505', // Deep Black
-                        'card-bg': 'rgba(255, 255, 255, 0.05)', // Transparent white for glass base
-                    }
-                }
-            }
-        }
-    </script>
+    <title>QuantumTech - The Future is Now</title>
+    <link rel="stylesheet" href="style.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;800&display=swap" rel="stylesheet">
 </head>
-<body class="bg-dark-bg min-h-screen text-gray-100 flex">
+<body>
 
-    <!-- Firebase Imports and Setup -->
-    <script type="module">
-        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
-        import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, doc, getDoc, addDoc, setDoc, updateDoc, onSnapshot, collection, query, limit, orderBy } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+    <div class="blur-orb-1"></div>
+    <div class="blur-orb-2"></div>
 
-        // --- GLOBAL VARIABLES (Provided by Canvas Environment) ---
-        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
-        const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : null;
-        const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : null;
-
-        let app, db, auth;
-        let userId = null;
-        let isAuthReady = false;
-
-        // Simple State Object with HARDCODED INITIAL VALUES
-        const state = {
-            view: 'profile', 
-            totalPoints: 1250, // Hardcoded initial score
-            activities: [],
-            leaderboardData: [],
-            username: 'ShadowRunner', // Hardcoded username
-        };
-
-        // UI Element References
-        const contentArea = document.getElementById('content-area');
-        const modal = document.getElementById('action-modal');
-        const totalPointsDisplay = document.getElementById('total-points-display');
-        const notificationBox = document.getElementById('notification-box');
-
-        // --- FIREBASE INITIALIZATION & AUTHENTICATION ---
-
-        async function initFirebase() {
-            if (!firebaseConfig) {
-                console.error("Firebase config is missing.");
-                return;
-            }
-
-            try {
-                app = initializeApp(firebaseConfig);
-                db = getFirestore(app);
-                auth = getAuth(app);
-                
-                // 1. Sign in
-                if (initialAuthToken) {
-                    await signInWithCustomToken(auth, initialAuthToken);
-                } else {
-                    await signInAnonymously(auth);
-                }
-
-                // 2. Set up Auth Listener
-                onAuthStateChanged(auth, (user) => {
-                    if (user) {
-                        userId = user.uid;
-                        isAuthReady = true;
-                        console.log("Firebase initialized. User ID:", userId);
-                        // Fetch initial data and start listeners
-                        setupDataListeners();
-                        updateView(state.view); // Render the initial view
-                    } else {
-                        console.error("Auth failed.");
-                    }
-                });
-
-            } catch (e) {
-                console.error("Error initializing Firebase:", e);
-            }
-        }
-
-        // --- FIREBASE PATH HELPERS ---
-
-        const getPrivateActivitiesCollectionRef = () => {
-            return collection(db, `artifacts/${appId}/users/${userId}/activities`);
-        };
-
-        const getPublicScoreDocRef = (uid = userId) => {
-            // Uses uid as the document ID for the public leaderboard score
-            return doc(db, `artifacts/${appId}/public/data/leaderboard_scores`, uid);
-        };
-
-        // --- DATA LISTENERS ---
-
-        function setupDataListeners() {
-            if (!db || !userId) return;
-
-            // 1. Listener for User Activities (Private Progress)
-            const activitiesQuery = query(getPrivateActivitiesCollectionRef(), orderBy("timestamp", "desc"));
-
-            onSnapshot(activitiesQuery, (snapshot) => {
-                const activities = [];
-                let newTotalPoints = 0;
-                snapshot.forEach((doc) => {
-                    const activity = doc.data();
-                    activities.push({...activity, id: doc.id});
-                    newTotalPoints += activity.points;
-                });
-                state.activities = activities;
-                state.totalPoints = newTotalPoints;
-                totalPointsDisplay.textContent = newTotalPoints.toLocaleString();
-                console.log("Activities updated. Total Points:", newTotalPoints);
-                if (state.view === 'progress') renderProgressView();
-                
-                // After fetching points, ensure the public score is updated
-                updatePublicScore(newTotalPoints);
-            });
-
-            // 2. Listener for Public Leaderboard
-            // NOTE: Using a query without orderBy to respect the constraint, sorting is done client-side.
-            const leaderboardQuery = query(collection(db, `artifacts/${appId}/public/data/leaderboard_scores`), limit(10));
-            
-            onSnapshot(leaderboardQuery, (snapshot) => {
-                const boardData = [];
-                snapshot.forEach((doc) => {
-                    boardData.push(doc.data());
-                });
-                
-                // Sort client-side (as per guidelines)
-                boardData.sort((a, b) => b.totalPoints - a.totalPoints);
-
-                state.leaderboardData = boardData.map((item, index) => ({
-                    ...item,
-                    rank: index + 1
-                }));
-                console.log("Leaderboard updated.");
-                if (state.view === 'leaderboard') renderLeaderboardView();
-            });
-        }
+    <nav class="glass-navbar">
+        <div class="navbar-logo">
+            <a href="#">C-S</a>
+        </div>
         
-        // --- DATA MUTATION ---
-        
-        async function updatePublicScore(newTotalPoints) {
-            if (!userId) return;
-            const scoreRef = getPublicScoreDocRef();
+        <ul class="nav-links">
             
-            // Check if user already exists in the leaderboard
-            const docSnap = await getDoc(scoreRef);
-            
-            if (docSnap.exists()) {
-                // Update existing score
-                await updateDoc(scoreRef, {
-                    totalPoints: newTotalPoints,
-                    lastUpdated: new Date()
-                }).catch(e => console.error("Error updating public score:", e));
-            } else {
-                // Create new score entry
-                await setDoc(scoreRef, {
-                    userId: userId,
-                    username: state.username,
-                    totalPoints: newTotalPoints,
-                    lastUpdated: new Date()
-                }).catch(e => console.error("Error setting initial public score:", e));
-            }
-        }
-
-
-        // --- POINT LOGIC & UI FUNCTIONS ---
-
-        function calculatePoints(text) {
-            text = text.toLowerCase();
-            let points = 0;
-            let multipliers = [];
-
-            // Simple point system based on keywords
-            if (text.includes('workout') || text.includes('exercise') || text.includes('ran') || text.includes('gym')) {
-                points += 25;
-                multipliers.push('Fitness');
-            }
-            if (text.includes('ate vegetable') || text.includes('salad') || text.includes('drank water') || text.includes('meal prep')) {
-                points += 15;
-                multipliers.push('Nutrition');
-            }
-            if (text.includes('read') || text.includes('studied') || text.includes('learned') || text.includes('coded')) {
-                points += 20;
-                multipliers.push('Learning');
-            }
-            if (text.includes('meditated') || text.includes('slept 8') || text.includes('journaled')) {
-                points += 10;
-                multipliers.push('Wellbeing');
-            }
-
-            // Fallback for any logged activity
-            if (points === 0 && text.length > 5) {
-                points = 5;
-                multipliers.push('Misc');
-            }
-            
-            return { points: points, categories: multipliers };
-        }
+    <li class="nav-item-dropdown">
         
-        async function logActivity(text) {
-            if (!db || !userId) {
-                showNotification("Error: Not connected to the database.", 0);
-                return;
-            }
-            if (text.trim() === '') return;
-
-            const { points, categories } = calculatePoints(text);
-            const activityRef = getPrivateActivitiesCollectionRef();
-
-            try {
-                await addDoc(activityRef, {
-                    description: text,
-                    points: points,
-                    categories: categories,
-                    timestamp: new Date()
-                });
-                
-                showNotification(`Logged action! You earned ${points} points.`, points);
-                
-                // Close modal and clear input
-                modal.classList.add('hidden');
-                document.getElementById('action-input').value = '';
-                
-            } catch (e) {
-                console.error("Error logging activity: ", e);
-                showNotification("An error occurred while saving your activity.", 0);
-            }
-        }
+        <a href="#">Features</a>
         
-        function showNotification(message, points) {
-            const pointText = points > 0 ? `<span class="font-bold text-lg text-accent ml-2">${points} Pts!</span>` : '';
-            notificationBox.innerHTML = `
-                <div class="flex items-center space-x-2">
-                    <svg class="w-6 h-6 ${points > 0 ? 'text-accent' : 'text-secondary'}" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                    <div>
-                        <p class="font-medium">${message}</p>
-                    </div>
-                    ${pointText}
+        <div class="dropdown-menu">
+            <a href="#">AI Infrastructure</a>
+            <a href="#">Global Edge Network</a>
+            <a href="#">Real-time Security</a>
+            <a href="#">Developer API</a>
+        </div>
+    </li>
+
+    <li><a href="#">Pricing</a></li>
+    <li><a href="#">Blog</a></li>
+    <li><a href="#">About</a></li>
+</ul>
+        <div class="navbar-cta">
+            <button class="login-signup-button">
+                Login / Sign Up
+            </button> </div>
+    </nav>
+
+    <main class="hero-section">
+        <h1>
+            Build the <span class="gradient-text">Future.</span><br>
+            Faster Than Ever.
+        </h1>
+        <p class="subtitle">
+            Welcome to the next generation of cloud infrastructure and AI-driven development.
+        </p>
+        <div class="hero-buttons">
+            <button class="cta-primary">Get Started Free</button>
+            <button class="cta-secondary">View Docs</button>
+        </div>
+    </main>
+  <section id="why-us" class="content-section">
+        <h2 class="section-heading">
+            <span class="gradient-text">Why</span> Choose Quantum?
+        </h2>
+        <p class="section-subheading">
+            We're not just a platform; we're your partner in innovation.
+        </p>
+        
+        <div class="features-grid">
+            <div class="glass-card">
+                <div class="card-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z" />
+                    </svg>
                 </div>
-            `;
-            notificationBox.classList.remove('opacity-0', 'pointer-events-none', 'translate-x-full');
-            notificationBox.classList.add('opacity-100', 'translate-x-0');
+                <h3>Blazing Fast</h3>
+                <p>Experience near-zero latency with our globally distributed edge network. Your content, delivered instantly.</p>
+            </div>
+            
+            <div class="glass-card">
+                <div class="card-icon">
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                         <path stroke-linecap="round" stroke-linejoin="round" d="M9 12.75L11.25 15 15 9.75m-3-7.036A11.959 11.959 0 013.598 6 11.99 11.99 0 003 9.749c0 5.592 3.824 10.29 9 11.623 5.176-1.332 9-6.03 9-11.622 0-1.31-.21-2.571-.6-3.751A11.959 11.959 0 0115 2.714" />
+                    </svg>
+                </div>
+                <h3>Ironclad Security</h3>
+                <p>Our infrastructure is protected by AI-driven threat detection and real-time anomaly analysis, 24/7.</p>
+            </div>
 
-            setTimeout(() => {
-                notificationBox.classList.remove('opacity-100', 'translate-x-0');
-                notificationBox.classList.add('opacity-0', 'pointer-events-none', 'translate-x-full');
-            }, 4000);
-        }
+            <div class="glass-card">
+                <div class="card-icon">
+                     <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5m9-6h3.75m-3.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-9.75 0h9.75" />
+                    </svg>
+                </div>
+                <h3>Developer First</h3>
+                <p>With clean APIs and comprehensive documentation, we empower your developers to build, test, and deploy faster.</p>
+            </div>
+        </div>
+    </section>
 
-        // --- RENDER FUNCTIONS ---
-        
-        function updateView(newView) {
-            state.view = newView;
-            document.querySelectorAll('.nav-button').forEach(btn => {
-                btn.classList.remove('bg-primary/20', 'text-white');
-                btn.classList.add('hover:bg-primary/10');
-            });
-            document.getElementById(`nav-${newView}`).classList.remove('hover:bg-primary/10');
-            document.getElementById(`nav-${newView}`).classList.add('bg-primary/20', 'text-white');
+    <section id="about" class="content-section">
+        <div class="about-container">
+            <div class="about-text">
+                <span class="pill-tag">Our Story</span>
+                <h2 class="section-heading-alt">We are architects of the new digital frontier.</h2>
+                <p>Founded in 2023, QuantumTech was born from a simple idea: that technology should be an accelerator, not a barrier. We are a team of engineers, visionaries, and creators passionate about building the tools that will define the next generation of the internet.</p>
+                <p>We believe in a future that is decentralized, faster, and more secure. We're here to help you build it.</p>
+            </div>
+            <div class="about-visual">
+                <div class="visual-glass-pane pane-1"></div>
+                <div class="visual-glass-pane pane-2"></div>
+                <div class="visual-glass-pane pane-3"></div>
+            </div>
+        </div>
+    </section>
 
-            switch (newView) {
-                case 'profile':
-                    renderProfileView();
-                    break;
-                case 'leaderboard':
-                    renderLeaderboardView();
-                    break;
-                case 'progress':
-                    renderProgressView();
-                    break;
-            }
-        }
-        
-        function renderProfileView() {
-            contentArea.innerHTML = `
-                <div class="p-8">
-                    <h1 class="text-4xl font-extrabold text-primary mb-10 border-b border-primary/30 pb-3">ACCESS TERMINAL: PROFILE</h1>
-                    <div class="glass-card p-8 rounded-3xl shadow-lg">
-                        <p class="text-gray-400 mb-6 text-lg">Your personalized gamified tracking dashboard.</p>
-                        
-                        <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
-                            <div>
-                                <p class="text-xl font-semibold mb-2 text-primary">Alias:</p>
-                                <span class="text-3xl text-accent font-mono">${state.username}</span>
+    <section id="objective" class="content-section objective-section">
+        <div class="objective-content">
+            <span class="pill-tag">Our Objective</span>
+            <h2 class="section-heading-alt">To democratize access to cutting-edge technology.</h2>
+            <p>Our mission is to make the most powerful AI, cloud, and security tools accessible to everyone—from a solo developer working on a passion project to a global enterprise scaling to millions of users. We achieve this through a relentless focus on simplicity, performance, and cost-efficiency.</p>
+        </div>
+    </section>
+  <section id="testimonials" class="content-section">
+        <h2 class="section-heading">
+            Trusted by <span class="gradient-text">Innovators</span>
+        </h2>
+        <p class="section-subheading">
+            Don't just take our word for it. See what our partners are saying.
+        </p>
+
+        <div class="slider-wrapper">
+            <div class="slider-container">
+                <div class="slider-track">
+                    
+                    <div class="slide">
+                        <div class="testimonial-card glass-card">
+                            <p class="quote">"QuantumTech's infrastructure is lightyears ahead. We cut our deployment times by 70% and our latency is virtually non-existent. It's a game-changer."</p>
+                            <div class="author-info">
+                                <img src="httpsimg.com/u/8558501" alt="Author 1"> <div class="author-details">
+                                    <h4>Alex Cohen</h4>
+                                    <span>CTO, Nova Dynamics</span>
+                                </div>
                             </div>
-                            <div>
-                                <p class="text-xl font-semibold mb-2 text-primary">Clearance Level:</p>
-                                <span class="text-3xl text-secondary font-mono">LIFETRACK-G4</span>
-                            </div>
-                        </div>
-
-                        <p class="text-lg font-semibold mt-8 mb-2">User ID (for peer connection):</p>
-                        <div class="bg-black/40 p-3 rounded-lg break-all text-sm font-mono text-gray-300 border border-secondary/30">
-                            ${userId || 'Authenticating...'}
-                        </div>
-                        <div class="mt-8 text-center glass-card p-6 rounded-2xl border-accent/50">
-                            <p class="text-3xl font-bold text-gray-300">Total Lifetime Score</p>
-                            <p class="text-6xl font-extrabold text-primary mt-2">${state.totalPoints.toLocaleString()}</p>
                         </div>
                     </div>
                     
-                    <h2 class="text-2xl font-bold mt-12 mb-4 text-primary border-b border-gray-700 pb-2">Protocol Guide</h2>
-                    <div class="glass-card p-6 rounded-2xl">
-                        <ul class="list-disc pl-5 text-gray-300 space-y-3 text-sm">
-                            <li>**Log Action** sends your daily achievements to the central system (e.g., "I ran 3 miles").</li>
-                            <li>Points are calculated based on recognized **keywords** and instantly update your score.</li>
-                            <li>View your **Progress** to see a chronological feed of all logged activities.</li>
-                            <li>The **Leaderboard** displays the top operatives globally!</li>
-                        </ul>
-                    </div>
-                </div>
-            `;
-        }
-
-        function renderLeaderboardView() {
-            let listItems = state.leaderboardData.map(item => `
-                <li class="flex items-center justify-between p-4 rounded-xl shadow-lg 
-                    ${item.userId === userId ? 'bg-primary/30 border-2 border-accent' : 'glass-card hover:bg-white/10'} transition duration-150">
-                    <div class="flex items-center space-x-4">
-                        <span class="text-2xl font-extrabold w-8 text-center 
-                            ${item.rank === 1 ? 'text-yellow-400' : item.rank === 2 ? 'text-gray-300' : item.rank === 3 ? 'text-secondary' : 'text-gray-400'}">
-                            ${item.rank}.
-                        </span>
-                        <div>
-                            <p class="text-lg font-semibold">${item.username}</p>
-                            <p class="text-xs text-gray-400 break-all">${item.userId.substring(0, 10)}...${item.userId.substring(item.userId.length - 10)}</p>
-                        </div>
-                    </div>
-                    <span class="text-3xl font-bold text-accent">${item.totalPoints.toLocaleString()}</span>
-                </li>
-            `).join('');
-
-            if (state.leaderboardData.length === 0) {
-                listItems = '<p class="text-center text-gray-400 py-8 glass-card rounded-xl">No global scores detected. Be the first to secure a ranking!</p>';
-            }
-
-            contentArea.innerHTML = `
-                <div class="p-8">
-                    <h1 class="text-4xl font-extrabold text-primary mb-10 border-b border-primary/30 pb-3">GLOBAL LEADERBOARD</h1>
-                    <ul class="space-y-4">
-                        ${listItems}
-                    </ul>
-                </div>
-            `;
-        }
-        
-        function renderProgressView() {
-            let activitiesList = state.activities.map(activity => {
-                const date = new Date(activity.timestamp.seconds * 1000).toLocaleString();
-                const categoryTags = activity.categories.map(cat => `<span class="text-xs font-medium bg-secondary/30 text-secondary px-2 py-0.5 rounded-full">${cat}</span>`).join(' ');
-                
-                return `
-                    <li class="glass-card p-4 rounded-2xl shadow-md flex justify-between items-start">
-                        <div class="flex-1 min-w-0">
-                            <p class="text-lg font-medium text-white break-words">${activity.description}</p>
-                            <p class="text-sm text-gray-400 mt-1 font-mono">${date}</p>
-                            <div class="flex space-x-2 mt-2 flex-wrap">
-                                ${categoryTags}
+                    <div class="slide">
+                         <div class="testimonial-card glass-card">
+                            <p class="quote">"The developer-first API is the best I've ever worked with. Clean, fast, and incredibly well-documented. Their AI-driven security gives us total peace of mind."</p>
+                            <div class="author-info">
+                                <img src="httpsimg.com/u/11613311" alt="Author 2"> <div class="author-details">
+                                    <h4>Samantha Lee</h4>
+                                    <span>Lead Engineer, Cyberscapes</span>
+                                </div>
                             </div>
                         </div>
-                        <span class="text-2xl font-extrabold text-accent ml-4 flex-shrink-0">${activity.points} Pts</span>
-                    </li>
-                `;
-            }).join('');
-            
-            if (state.activities.length === 0) {
-                activitiesList = '<p class="text-center text-gray-400 py-8 glass-card rounded-xl">No historical data found. Log your first activity to start tracking!</p>';
-            }
-
-            contentArea.innerHTML = `
-                <div class="p-8">
-                    <h1 class="text-4xl font-extrabold text-primary mb-10 border-b border-primary/30 pb-3">ACTIVITY LOG</h1>
-                    <div class="glass-card p-4 rounded-2xl mb-6 border-accent/50">
-                        <p class="text-xl font-bold text-gray-300">Total Score: <span class="text-accent">${state.totalPoints.toLocaleString()}</span></p>
                     </div>
-                    <ul class="space-y-4">
-                        ${activitiesList}
+
+                    <div class="slide">
+                         <div class="testimonial-card glass-card">
+                            <p class="quote">"We migrated our entire global operations to Quantum in a single weekend. The support was phenomenal, and the performance increase was immediate."</p>
+                            <div class="author-info">
+                                <img src="httpsimg.com/u/132510" alt="Author 3"> <div class="author-details">
+                                    <h4>David Chen</h4>
+                                    <span>CEO, Orbital Solutions</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                </div>
+            </div>
+
+            <button class="slider-arrow" id="prev-slide" aria-label="Previous Slide">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5L8.25 12l7.5-7.5" /></svg>
+            </button>
+            <button class="slider-arrow" id="next-slide" aria-label="Next Slide">
+                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 4.5l7.5 7.5-7.5 7.5" /></svg>
+            </button>
+
+            <div class="slider-dots" id="slider-dots">
+                </div>
+        </div>
+    </section>
+
+    <footer class="site-footer">
+        <div class="blur-orb-3"></div>
+        <div class="blur-orb-4"></div>
+
+        <div class="footer-content">
+            <div class="footer-cta">
+                <h2 class="gradient-text">Let's build the future.</h2>
+                <h2>Together.</h2>
+                <button class="cta-primary footer-cta-button">
+                    Start Your Project
+                </button>
+            </div>
+
+            <div class="footer-links">
+                <div class="link-column">
+                    <h4>Product</h4>
+                    <ul>
+                        <li><a href="#">Features</a></li>
+                        <li><a href="#">Pricing</a></li>
+                        <li><a href="#">Integrations</a></li>
+                        <li><a href="#">API Docs</a></li>
                     </ul>
                 </div>
-            `;
-            
-        }
-
-        // --- ATTACH EVENT LISTENERS & START APP ---
-
-        window.onload = () => {
-            document.getElementById('log-action-btn').addEventListener('click', () => {
-                modal.classList.remove('hidden');
-            });
-
-            document.getElementById('close-modal-btn').addEventListener('click', () => {
-                modal.classList.add('hidden');
-            });
-            
-            document.getElementById('action-form').addEventListener('submit', (e) => {
-                e.preventDefault();
-                const input = document.getElementById('action-input').value;
-                logActivity(input);
-            });
-            
-            document.getElementById('nav-profile').addEventListener('click', () => updateView('profile'));
-            document.getElementById('nav-leaderboard').addEventListener('click', () => updateView('leaderboard'));
-            document.getElementById('nav-progress').addEventListener('click', () => updateView('progress'));
-
-            // Start the application
-            initFirebase();
-        };
-
-        window.updateView = updateView;
-        
-    </script>
-    
-    <!-- MAIN APPLICATION UI -->
-
-    <!-- Sidebar: w-20 (collapsed) hover:w-64 (expanded) -->
-    <div class="w-20 hover:w-64 glass-sidebar flex-shrink-0 p-4 shadow-2xl z-20 group flex flex-col justify-between overflow-hidden fixed top-0 left-0 bottom-0">
-        
-        <!-- Header (Logo/Title) -->
-        <div class="mb-8 pt-4 h-16 flex items-center justify-center group-hover:justify-start">
-            <span class="text-3xl font-bold text-primary tracking-wider whitespace-nowrap overflow-hidden opacity-0 group-hover:opacity-100 transition-opacity duration-300">LifeTrack</span>
-            <span class="text-3xl font-bold text-primary tracking-wider text-center group-hover:hidden">L</span>
-        </div>
-        
-        <!-- Navigation Buttons -->
-        <div class="space-y-6 flex-grow">
-            <!-- Navigation Buttons Container -->
-            <div class="flex flex-col items-center group-hover:items-stretch space-y-2">
-                <!-- Profile -->
-                <button id="nav-profile" class="nav-button w-12 h-12 group-hover:w-full flex items-center justify-center group-hover:justify-start p-3 rounded-2xl transition-all duration-300 bg-primary/20 text-white shadow-lg shadow-primary/20">
-                    <div class="flex items-center justify-center w-6 h-6">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.121 17.804A13.937 13.937 0 0112 16c2.5 0 4.847.655 6.879 1.804M15 10a3 3 0 11-6 0 3 3 0 016 0zm6 3a9 9 0 11-18 0 9 9 0 0118 0z"></path>
-                        </svg>
-                    </div>
-                    <span class="ml-0 group-hover:ml-4 text-lg font-medium opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap overflow-hidden">Profile</span>
-                </button>
-
-                <!-- Leaderboard -->
-                <button id="nav-leaderboard" class="nav-button w-12 h-12 group-hover:w-full flex items-center justify-center group-hover:justify-start p-3 rounded-2xl transition-all duration-300 hover:bg-primary/10">
-                    <div class="flex items-center justify-center w-6 h-6">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M14 10h4.764a2 2 0 011.789 2.894l-3.5 7A2 2 0 0115.263 21h-4.017c-.163 0-.326-.02-.485-.058L2.492 15.602a5.4 5.4 0 011.479-8.485l4.382-2.191c.214-.108.435-.157.655-.181L14 10z"></path>
-                        </svg>
-                    </div>
-                    <span class="ml-0 group-hover:ml-4 text-lg font-medium opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap overflow-hidden">Leaderboard</span>
-                </button>
-
-                <!-- Progress -->
-                <button id="nav-progress" class="nav-button w-12 h-12 group-hover:w-full flex items-center justify-center group-hover:justify-start p-3 rounded-2xl transition-all duration-300 hover:bg-primary/10">
-                    <div class="flex items-center justify-center w-6 h-6">
-                        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg">
-                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 8v8m-4-6v6m-4-2v4m12 1a2 2 0 01-2 2H4a2 2 0 01-2-2V6a2 2 0 012-2h12a2 2 0 012 2v10z"></path>
-                        </svg>
-                    </div>
-                    <span class="ml-0 group-hover:ml-4 text-lg font-medium opacity-0 group-hover:opacity-100 transition-all duration-300 whitespace-nowrap overflow-hidden">Progress Log</span>
-                </button>
-            </div>
-        </div>
-
-        <!-- Score and Log Action (Bottom) -->
-        <div class="mt-auto pt-4 border-t border-gray-700">
-            <div class="group-hover:block hidden">
-                <h3 class="text-sm font-semibold text-gray-400 uppercase mb-2">Current Score</h3>
-                <div class="flex items-center justify-between bg-black/40 p-3 rounded-lg shadow-inner border border-accent/20">
-                    <span class="text-xl font-bold text-accent">Points:</span>
-                    <span id="total-points-display" class="text-2xl font-extrabold text-white">1,250</span>
+                <div class="link-column">
+                    <h4>Company</h4>
+                    <ul>
+                        <li><a href="#">About Us</a></li>
+                        <li><a href="#">Careers</a></li>
+                        <li><a href="#">Blog</a></li>
+                        <li><a href="#">Contact</a></li>
+                    </ul>
+                </div>
+                <div class="link-column">
+                    <h4>Resources</h4>
+                    <ul>
+                        <li><a href="#">Support</a></li>
+                        <li><a href="#">Privacy Policy</a></li>
+                        <li><a href="#">Terms of Service</a></li>
+                    </ul>
                 </div>
             </div>
-
-            <!-- Log Action Button (Text expanded, Icon collapsed) -->
-            <button id="log-action-btn" class="mt-6 w-full bg-accent hover:bg-accent/80 text-dark-bg font-bold py-3 px-4 rounded-xl shadow-lg shadow-accent/40 transform transition duration-200 hover:scale-[1.03] flex justify-center items-center">
-                <svg class="w-6 h-6 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v3m0 0v3m0-3h3m-3 0H9m12 0a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
-                <span class="whitespace-nowrap overflow-hidden opacity-0 group-hover:opacity-100 transition-opacity duration-300 ml-3">Log Action</span>
-            </button>
         </div>
-    </div>
-    
-    <!-- Main Content Wrapper to account for fixed sidebar width -->
-    <div class="flex-1 ml-20 lg:ml-20">
-        <!-- Main Content Area -->
-        <div id="content-area" class="w-full">
-            <!-- Content will be rendered here by JavaScript -->
-            <div class="p-8 text-center text-primary text-xl">Initializing Terminal...</div>
-        </div>
-    </div>
-    
-    <!-- Notification Box (Absolute Positioned, slides in from right) -->
-    <div id="notification-box" class="fixed top-5 right-5 z-50 p-4 rounded-xl shadow-2xl glass-card border-accent text-white transition-all duration-500 opacity-0 pointer-events-none translate-x-full min-w-[300px]">
-        <!-- Content inserted by showNotification function -->
-    </div>
 
-    <!-- Log Action Modal -->
-    <div id="action-modal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-40 hidden">
-        <div class="glass-card p-8 rounded-3xl shadow-2xl w-full max-w-md transform scale-100 transition-transform duration-300 border-primary/50">
-            <div class="flex justify-between items-center mb-6">
-                <h2 class="text-2xl font-bold text-primary">Log New Achievement</h2>
-                <button id="close-modal-btn" class="text-gray-400 hover:text-white transition">
-                    <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg>
-                </button>
+        <div class="footer-bottom">
+            <div class="copyright">
+                &copy; <span id="current-year">2025</span> CarbonScope. All rights reserved.
             </div>
-            
-            <form id="action-form">
-                <label for="action-input" class="block text-sm font-medium text-gray-300 mb-2">Input Command/Action Details:</label>
-                <textarea 
-                    id="action-input" 
-                    rows="4" 
-                    class="w-full p-3 bg-black/30 border border-primary/50 rounded-lg text-white focus:ring-primary focus:border-primary transition duration-150 resize-none font-mono" 
-                    placeholder="E.g., Coded for 2 hours on a personal project (Learning 20 Pts)." 
-                    required></textarea>
-                
-                <p class="text-xs text-gray-400 mt-2">Note: Key phrases grant higher score multipliers.</p>
-                
-                <button type="submit" class="mt-6 w-full bg-primary hover:bg-primary/80 text-dark-bg font-bold py-3 rounded-xl shadow-md shadow-primary/30 transition duration-200">
-                    Execute Log
-                </button>
-            </form>
+            <div class="social-links">
+                <a href="#" aria-label="Twitter" class="social-icon"><svg>...</svg></a> <a href="#" aria-label="GitHub" class="social-icon"><svg>...</svg></a>
+                <a href="#" aria-label="LinkedIn" class="social-icon"><svg>...</svg></a>
+            </div>
         </div>
-    </div>
+    </footer>
+    
+    <script src="app.js"></script>
 
 </body>
 </html>
+
