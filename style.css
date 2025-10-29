@@ -136,7 +136,7 @@ h1 {
     text-align: center;
     min-height: 100vh;
     padding: 0 2rem;
-    padding-top: 150px; /* Push content below the fixed navbar */
+    padding-top: 60px; /* Push content below the fixed navbar */
 }
 
 /* The "Amazing" Gradient Text */
